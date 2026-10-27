@@ -3,7 +3,7 @@
 粘贴微信/支付宝账单或银行扣款短信，自动识别「连续包月 / 自动续费」订阅；按红黄绿三级标注风险；一键查看退订指引；内置 AI 聊天助手答疑。纯前端 + 本地存储，数据不上传。
 
 - 前端：原生 HTML/CSS/JS（ES Module），无框架无构建，部署到 GitHub Pages
-- 后端：Cloudflare Worker 代理 Claude API，提供真 AI 对话
+- AI：沿用浏览器直连 Anthropic API（**自带 Key**），不经过任何自建后端
 - 本地测试：`node --test`（13 个用例）
 
 ## 功能
@@ -26,9 +26,6 @@ subscription-cleaner/
 │   ├── risk.js           # 风险评分
 │   ├── library.js        # 订阅服务知识库 + 退订步骤
 │   └── styles.css        # 样式
-├── worker/
-│   └── index.js          # Cloudflare Worker（代理 Claude API）
-├── wrangler.toml         # Worker 配置
 ├── tests/                # node:test 单测
 └── package.json
 ```
@@ -61,40 +58,19 @@ git push -u origin main
 
 然后在 GitHub 仓库 **Settings → Pages → Source 选 `Deploy from a branch` → 分支 `main`、目录 `/ (root)` → Save**，等约 1 分钟自动构建，访问 `https://<用户名>.github.io/subscription-cleaner/`。
 
-## 部署后端 Cloudflare Worker（AI 助手）
+## AI 助手：自带 API Key（无需自建后端）
 
-需要：一个 [Anthropic API key](https://console.anthropic.com/)（Chat 会用到）。
+AI 助手由**每位使用者自己的** Anthropic API Key 驱动，站点本身不保存、不代理任何 Key，因此站长不承担任何人的调用费用。
 
-```bash
-cd C:/Users/asus/Desktop/subscription-cleaner
+使用步骤：
 
-# 安装/登录 wrangler（没有 Node 依赖，wrangler 单独使用）
-npm install -g wrangler
-npx wrangler login
+1. 到 [console.anthropic.com](https://console.anthropic.com/) 创建一个 API Key（`sk-ant-...`）
+2. 打开页面，点右下角聊天按钮，再点右上角 ⚙
+3. 粘贴 Key → 保存，即可对话
 
-# 部署
-npx wrangler deploy
+Key 存在该浏览器的 `localStorage`（`subs-cleaner:apikey`），发送消息时浏览器直连 `https://api.anthropic.com/v1/messages`，附带官方要求的 `anthropic-dangerous-direct-browser-access: true` 头。点「清除」可随时删除。
 
-# 设置 Anthropic API key（粘贴后回车）
-npx wrangler secret put ANTHROPIC_API_KEY
-
-# 可选：覆盖默认模型（默认 claude-sonnet-5-5）
-npx wrangler secret put MODEL
-```
-
-部署成功后终端会打印地址，形如 `https://subs-cleaner-worker.<你的子域>.workers.dev`。验证：浏览器打开该地址应返回 `{"ok":true,...}`。
-
-## 连接前后端
-
-两种方式任选：
-
-1. **不改代码（推荐）**：打开已部署的页面，按 F12 打开控制台，执行
-   ```js
-   localStorage.setItem('subs-cleaner:worker', 'https://subs-cleaner-worker.xxx.workers.dev')
-   ```
-   刷新页面后即可对话。
-
-2. **写死默认值**：编辑 `assets/app.js` 顶部 `WORKER_URL` 的默认值后重新推送。
+> 提示：任何人都能在自己浏览器里填自己的 Key 使用；没有 Key 时除 AI 对话外的所有功能（扫描、风险、退订指引）照常可用。
 
 ## 说明与边界
 

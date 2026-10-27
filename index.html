@@ -91,9 +91,20 @@
     <div class="chat-head">
       <div>
         <strong>续费管家 AI 助手</strong>
-        <span class="chat-status" id="chatStatus">未连接后端</span>
+        <span class="chat-status" id="chatStatus">未配置 API Key</span>
       </div>
-      <button id="chatClose" class="icon-btn" aria-label="关闭">&times;</button>
+      <div class="chat-head-actions">
+        <button id="keyBtn" class="icon-btn" title="设置 API Key" aria-label="设置 API Key">⚙</button>
+        <button id="chatClose" class="icon-btn" aria-label="关闭">&times;</button>
+      </div>
+    </div>
+    <div id="keyBar" class="key-bar" hidden>
+      <p class="key-hint">填入你自己的 Anthropic API Key（<code>sk-ant-...</code>）。只保存在本浏览器，发送时直连 api.anthropic.com，不经过任何第三方服务器，费用计入你自己的账号。</p>
+      <input id="keyInput" type="password" placeholder="sk-ant-..." autocomplete="off" spellcheck="false" />
+      <div class="key-actions">
+        <button id="keySave" class="btn primary small">保存</button>
+        <button id="keyClear" class="btn ghost small">清除</button>
+      </div>
     </div>
     <div id="chatMessages" class="chat-messages"></div>
     <div class="chat-input">

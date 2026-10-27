@@ -3,10 +3,19 @@ import { scoreRisk, monthlyAmount } from './risk.js';
 import { findService, genericSteps, buildSearchUrl } from './library.js';
 
 const STORE_KEY = 'subs-cleaner:subs';
-const WORKER_KEY = 'subs-cleaner:worker';
-// 后端 Cloudflare Worker 地址：部署后用下面命令写入，或直接改默认值。
-// localStorage.setItem('subs-cleaner:worker', 'https://你的worker.workers.dev')
-const WORKER_URL = localStorage.getItem(WORKER_KEY) || '';
+const API_KEY_STORE = 'subs-cleaner:apikey';
+
+const API_URL = 'https://api.anthropic.com/v1/messages';
+const MODEL = 'claude-sonnet-5-5';
+const SYSTEM_PROMPT = [
+  '你是「续费管家」的 AI 订阅管理助手，帮用户判断哪些连续包月 / 自动续费该退、怎么退。',
+  '回答原则：',
+  '- 用中文，简短、口语化，先直接给结论和建议。',
+  '- 结合用户当前的订阅列表（会附在下方）给出个性化建议：哪些是高风险该立即退、哪些可保留。',
+  '- 退订步骤给 App 内路径，并提醒用户可在支付宝/微信的「扣费服务」里统一解约。',
+  '- 不编造官方联系方式、不保证退订一定成功；不确定时建议去官方入口或搜索确认。',
+  '- 不提供医疗、法律、金融投资建议。',
+].join('\n');
 
 const $ = (id) => document.getElementById(id);
 
@@ -287,6 +296,33 @@ function buildContext() {
   return '用户当前订阅：\n' + lines.join('\n');
 }
 
+function getKey() { return localStorage.getItem(API_KEY_STORE) || ''; }
+
+function updateKeyStatus() {
+  const has = !!getKey();
+  $('chatStatus').textContent = has ? '已配置自己的 API Key' : '未配置 API Key';
+  if (!has) $('keyBar').hidden = false;
+}
+
+function saveKey() {
+  const key = $('keyInput').value.trim();
+  if (!/^sk-ant-/.test(key)) {
+    alert('Key 格式不对，应以 sk-ant- 开头。');
+    return;
+  }
+  localStorage.setItem(API_KEY_STORE, key);
+  $('keyInput').value = '';
+  $('keyBar').hidden = true;
+  updateKeyStatus();
+}
+
+function clearKey() {
+  if (!confirm('清除已保存的 API Key？')) return;
+  localStorage.removeItem(API_KEY_STORE);
+  $('keyBar').hidden = false;
+  updateKeyStatus();
+}
+
 function openChat() {
   $('chatPanel').hidden = false;
   if (!chatReady) {
@@ -294,9 +330,10 @@ function openChat() {
     const st = computeStats();
     chatHistory.push({
       role: 'assistant',
-      content: `你好，我是续费管家 AI 助手。\n\n可以问我：某笔订阅该不该退、退订步骤、怎么避免被扣费、如何管理自动续费等。\n\n当前你记录了 ${subs.length} 项订阅，其中高风险 ${st.red} 项、中风险 ${st.yellow} 项。`,
+      content: `你好，我是续费管家 AI 助手。\n\n可以问我：某笔订阅该不该退、退订步骤、怎么避免被扣费、如何管理自动续费等。\n\n当前你记录了 ${subs.length} 项订阅，其中高风险 ${st.red} 项、中风险 ${st.yellow} 项。\n\nAI 助手使用你自己的 Anthropic API Key，点右上角 ⚙ 填写。`,
     });
   }
+  updateKeyStatus();
   renderChat();
 }
 
@@ -321,31 +358,58 @@ async function sendChat() {
   const input = $('chatInput');
   const text = input.value.trim();
   if (!text || typing) return;
+
+  const key = getKey();
+  if (!key) {
+    $('keyBar').hidden = false;
+    $('keyInput').focus();
+    return;
+  }
+
   input.value = '';
   chatHistory.push({ role: 'user', content: text });
   renderChat();
 
-  if (!WORKER_URL) {
-    chatHistory.push({
-      role: 'assistant',
-      content: 'AI 助手后端尚未配置。\n\n请先部署 Cloudflare Worker（见 README），然后在浏览器控制台执行：\nlocalStorage.setItem("subs-cleaner:worker", "https://你的worker.workers.dev")\n\n之后刷新页面即可对话。',
-    });
-    renderChat();
-    return;
-  }
+  const messages = chatHistory
+    .filter((m) => m.role === 'user' || m.role === 'assistant')
+    .map((m) => ({ role: m.role, content: m.content }));
+  while (messages.length && messages[0].role !== 'user') messages.shift();
 
   setTyping(true);
   try {
-    const res = await fetch(WORKER_URL.replace(/\/$/, '') + '/api/chat', {
+    const res = await fetch(API_URL, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ messages: chatHistory.slice(-12), context: buildContext() }),
+      headers: {
+        'content-type': 'application/json',
+        'x-api-key': key,
+        'anthropic-version': '2023-06-01',
+        'anthropic-dangerous-direct-browser-access': 'true',
+      },
+      body: JSON.stringify({
+        model: MODEL,
+        max_tokens: 600,
+        system: `${SYSTEM_PROMPT}\n\n${buildContext()}`,
+        messages: messages.slice(-12),
+      }),
     });
+
     const data = await res.json().catch(() => ({}));
-    const reply = data.reply || (data.error ? `出错了：${data.error}` : `请求失败（HTTP ${res.status}）`);
-    chatHistory.push({ role: 'assistant', content: reply });
+    if (!res.ok) {
+      const msg = data?.error?.message || `Anthropic API 返回 HTTP ${res.status}`;
+      if (res.status === 401 || res.status === 403) {
+        localStorage.removeItem(API_KEY_STORE);
+        $('keyBar').hidden = false;
+        updateKeyStatus();
+        chatHistory.push({ role: 'assistant', content: `Key 无效或已失效（${msg}），请点右上角 ⚙ 重新填写。` });
+      } else {
+        chatHistory.push({ role: 'assistant', content: `请求失败：${msg}` });
+      }
+    } else {
+      const reply = (data?.content || []).filter((c) => c.type === 'text').map((c) => c.text).join('') || '（无回复）';
+      chatHistory.push({ role: 'assistant', content: reply });
+    }
   } catch (err) {
-    chatHistory.push({ role: 'assistant', content: `请求失败：${err.message}\n请确认后端地址正确、已部署且开启了 CORS。` });
+    chatHistory.push({ role: 'assistant', content: `请求失败：${err.message}\n请检查网络与代理设置。` });
   }
   setTyping(false);
   renderChat();
@@ -376,5 +440,12 @@ $('chatFab').addEventListener('click', toggleChat);
 $('chatClose').addEventListener('click', closeChat);
 $('chatSend').addEventListener('click', sendChat);
 $('chatInput').addEventListener('keydown', (e) => { if (e.key === 'Enter') sendChat(); });
+$('keyBtn').addEventListener('click', () => {
+  $('keyBar').hidden = !$('keyBar').hidden;
+  if (!$('keyBar').hidden) $('keyInput').focus();
+});
+$('keySave').addEventListener('click', saveKey);
+$('keyClear').addEventListener('click', clearKey);
+$('keyInput').addEventListener('keydown', (e) => { if (e.key === 'Enter') saveKey(); });
 
 render();
