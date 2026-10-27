@@ -1,0 +1,10 @@
+{
+  "name": "subscription-cleaner",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "自动续费清理小工具：粘贴账单自动识别连续包月、红黄绿风险标注、一键退订指引、AI 助手",
+  "scripts": {
+    "test": "node --test"
+  }
+}
